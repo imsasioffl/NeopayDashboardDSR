@@ -2,38 +2,39 @@
 
     try {
 
-        // Wait for the element
-        await reqElement.waitFor({ state: "attached", timeout: timeoutsec * 1000 });
+        const isChecked = await reqElement.evaluate(el => {
 
-        // Get tag name
-        const tagName = await reqElement.evaluate(el => el.tagName.toLowerCase());
-
-        let isChecked = false;
-
-        if (tagName === "input") {
             // Native checkbox/radio
-            isChecked = await reqElement.isChecked();
-        } else {
-            // Custom checkbox
-            const className = await reqElement.getAttribute("class") || "";
-
-            if (className.includes("checkbox-checked")) {
-                isChecked = true;
-            } else {
-                // Fallback: check aria-checked if present
-                const ariaChecked = await reqElement.getAttribute("aria-checked");
-                isChecked = ariaChecked === "true";
+            if (el.tagName.toLowerCase() === "input") {
+                return el.checked;
             }
-        }
+
+            // Custom checkbox
+            const cls = el.className || "";
+            if (cls.includes("checkbox-checked")) {
+                return true;
+            }
+
+            if (cls.includes("checkbox-unchecked")) {
+                return false;
+            }
+
+            // aria-checked support
+            if (el.getAttribute("aria-checked") === "true") {
+                return true;
+            }
+
+            return false;
+        });
 
         if (isChecked) {
             return "Success. Element is checked.";
         }
 
-        throw new Error("Element is not checked.");
+        return "Failure. Element is not checked.";
 
     } catch (err) {
-        return "Failure. " + err.message;
+        return "Failure. Error: " + err.message;
     }
 
 });
