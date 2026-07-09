@@ -40,20 +40,17 @@
 // });
 
 // =====
-
 (async function (page, reqElement, xpathval, testdata, timeoutSec) {
  
     try {
  
-        const element = await reqElement.elementHandle();
- 
-        const inputType = await element.evaluate(el => el.type);
+        const inputType = await reqElement.getAttribute("type");
  
         if (inputType === "hidden") {
  
             await page.evaluate(({ xpathval, testdata }) => {
  
-                const ele = document.evaluate(
+                const element = document.evaluate(
                     xpathval,
                     document,
                     null,
@@ -61,15 +58,14 @@
                     null
                 ).singleNodeValue;
  
-                if (!ele)
+                if (!element)
                     throw new Error("Element not found");
  
-                ele.value = testdata;
+                element.value = testdata;
+                element.dispatchEvent(new Event("input", { bubbles: true }));
+                element.dispatchEvent(new Event("change", { bubbles: true }));
  
-                ele.dispatchEvent(new Event("input", { bubbles: true }));
-                ele.dispatchEvent(new Event("change", { bubbles: true }));
- 
-                const visible = document.getElementById("igtxt" + ele.id);
+                const visible = document.getElementById("igtxt" + element.id);
  
                 if (visible) {
                     visible.value = testdata;
@@ -82,7 +78,6 @@
  
         } else {
  
-            await reqElement.fill("");
             await reqElement.fill(testdata);
             await page.keyboard.press("Tab");
  
@@ -97,4 +92,5 @@
     }
  
 });
+
  
