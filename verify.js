@@ -41,29 +41,19 @@
 
 // =====
 
-
 (async function (page, reqElement, xpathval, testdata, timeoutSec) {
- 
-    console.log("Inside keyword Input - Textbox");
-    console.log("Parameters:", xpathval, testdata, timeoutSec);
  
     try {
  
-        // Normal textbox
-        await reqElement.click();
-        await reqElement.fill("");
-        await reqElement.fill(testdata);
-        await page.keyboard.press("Tab");
+        const element = await reqElement.elementHandle();
  
-        return "Success - Successfully entered the value in the textbox";
+        const inputType = await element.evaluate(el => el.type);
  
-    } catch (err) {
- 
-        try {
+        if (inputType === "hidden") {
  
             await page.evaluate(({ xpathval, testdata }) => {
  
-                const element = document.evaluate(
+                const ele = document.evaluate(
                     xpathval,
                     document,
                     null,
@@ -71,48 +61,38 @@
                     null
                 ).singleNodeValue;
  
-                if (!element)
+                if (!ele)
                     throw new Error("Element not found");
  
-                // Update hidden/read-only element
-                element.value = testdata;
+                ele.value = testdata;
  
-                // Terra hidden textbox handling
-                const visibleElement = document.getElementById("igtxt" + element.id);
+                ele.dispatchEvent(new Event("input", { bubbles: true }));
+                ele.dispatchEvent(new Event("change", { bubbles: true }));
  
-                if (visibleElement) {
-                    visibleElement.value = testdata;
+                const visible = document.getElementById("igtxt" + ele.id);
  
-                    visibleElement.dispatchEvent(new Event("input", {
-                        bubbles: true
-                    }));
- 
-                    visibleElement.dispatchEvent(new Event("change", {
-                        bubbles: true
-                    }));
+                if (visible) {
+                    visible.value = testdata;
+                    visible.dispatchEvent(new Event("input", { bubbles: true }));
+                    visible.dispatchEvent(new Event("change", { bubbles: true }));
+                    visible.dispatchEvent(new Event("blur", { bubbles: true }));
                 }
- 
-                element.dispatchEvent(new Event("input", {
-                    bubbles: true
-                }));
- 
-                element.dispatchEvent(new Event("change", {
-                    bubbles: true
-                }));
  
             }, { xpathval, testdata });
  
+        } else {
+ 
+            await reqElement.fill("");
+            await reqElement.fill(testdata);
             await page.keyboard.press("Tab");
  
-            return "Success - Successfully entered the value in the hidden textbox";
- 
-        } catch (err1) {
- 
-            console.log("Failure:", err1);
- 
-            return "Failure - Failed to enter value in textbox. Error: " + err1;
- 
         }
+ 
+        return "Success";
+ 
+    } catch (err) {
+ 
+        return "Failure - " + err.message;
  
     }
  
