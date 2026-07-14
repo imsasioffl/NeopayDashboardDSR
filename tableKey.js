@@ -1,7 +1,7 @@
 (async function (page, reqElement, xpathval, testdata, timeoutsec, expect) {
 
     try {
-
+// Card|Credit Adjustment|4198682470601740|100.00|784 
         const expected = testdata.split("|").map(x => x.trim());
 
         const rows = page.locator(`xpath=${xpathval}//tbody/tr[td]`);
