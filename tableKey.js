@@ -24,7 +24,8 @@
 
         await expect(found).toBeTruthy();
 
-        return "Success. Matching row found.";
+        // return "Success. Matching row found.";
+        return `Success. Successfully verified the following values across the table row: ${expected.join(", ")}.`;
 
     } catch (err) {
         return "Failed : " + err.message;
