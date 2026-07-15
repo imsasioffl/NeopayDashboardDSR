@@ -1,0 +1,34 @@
+Subject: Access & Setup Request: Automating Batch Job Trigger via Prime Jobs Administrator
+
+Hi Team,
+
+We are working on automating the triggering of batch jobs (e.g., Embossing File under Ad Hoc) currently run manually through the Prime Jobs Administrator client (PRMPROD). Our automation application needs to trigger these jobs programmatically instead of through the GUI, and we need your guidance on the correct and supported way to set this up.
+
+Could you please help us with the following:
+
+1. Trigger Mechanism
+   - Is there a documented API, CLI, or command-line utility provided by TSYS/Prime specifically meant for triggering Ad Hoc jobs externally (outside the GUI)?
+   - If yes, could you share the relevant documentation, endpoint details, or executable/command syntax?
+
+2. Database Behavior (if no API/CLI exists)
+   - When a job is triggered via the GUI (e.g., clicking Run on an Ad Hoc job), which table(s) get updated to initiate execution?
+   - Is there a scheduler/daemon process polling these tables, and can you confirm this is safe to interact with directly from our side?
+
+3. Access & Credentials
+   - We currently have DB access (read) under PRMPROD. Could a dedicated service account be provisioned for automation, scoped only to the specific job-trigger operation (least privilege, not full schema access)?
+   - Please advise if this requires a separate write-access request beyond what we currently have.
+
+4. Network/Firewall Setup
+   - Source: our automation application server (IP to be shared separately)
+   - Destination: the Prime application/DB server
+   - Could you confirm the correct destination IP, port, and protocol required for this integration (API port, DB port, or both)?
+
+5. Test Environment
+   - Is there a UAT/sandbox instance of Prime Jobs Administrator available where we can safely test the trigger mechanism before implementing it against PRMPROD?
+
+Our goal is to build this in a way that doesn't bypass any internal validation or locking logic the application performs, so we'd appreciate your guidance on the safest supported approach.
+
+Please let us know if a call would help walk through this, or if there's someone from the TSYS/Prime support side we should loop in.
+
+Thanks and regards,
+Sasikumar
