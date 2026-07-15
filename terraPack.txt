@@ -1,0 +1,70 @@
+msg.nova = msg.nova || {};
+msg.nova.context = msg.nova.context || {};
+const parameters = tParams;
+console.log("parameters: ", parameters)
+
+    console.log("Inside parameter condition")
+   Object.keys(parameters).forEach(key => {
+
+        msg.nova.context[key] = parameters[key];
+
+
+
+
+ 
+    console.log("Checking msg.mdmLive structure...");
+    console.log("-------msg.mdmLive---------", JSON.stringify(msg.mdmlive, null, 2))
+    const rrrRoot = msg.mdmlive?.description_testcase?.global?.RRF;
+
+
+===========================================================================================================
+
+(async function (page, reqElement, xpathval, testdata, timeoutsec, TwitterApi, faker) {
+
+    const SftpClient = require('ssh2-sftp-client');
+    const client = new SftpClient();
+
+    try {
+
+        let config = {};
+
+        if (typeof testdata === "string") {
+            testdata.split(";").forEach(item => {
+                let [key, value] = item.split("=");
+                if (key && value) {
+                    config[key.trim()] = value.trim();
+                }
+            });
+        } else {
+            config = testdata;
+        }
+
+        await client.connect({
+            host: config.host,
+            port: Number(config.port || 22),
+            username: config.username,
+            password: config.password
+        });
+
+        await client.fastGet(
+            config.source,
+            config.destination
+        );
+
+        await client.end();
+
+        return "Success +++++ File downloaded successfully from " +
+               config.source +
+               " to " +
+               config.destination;
+
+    } catch (err) {
+
+        try {
+            await client.end();
+        } catch (e) {}
+
+        return "Failure ----- " + err.message;
+    }
+
+})
