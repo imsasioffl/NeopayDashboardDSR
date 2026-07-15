@@ -73,3 +73,34 @@ const SftpClient = require('ssh2-sftp-client');
 
 
 This library needed
+==================================
+
+Hi Team,
+
+We require the **ssh1-sftp-client** Node.js package to be installed in the **TerrA** application's `node_modules` directory to support SFTP connectivity for our automation.
+
+Please perform the following steps:
+
+1. Ensure **Node.js** and **npm** are available on the server.
+2. Navigate to the TerrA installation directory:
+
+   ```
+   <TerrA_Installation_Path>
+   ```
+3. Install the required package:
+
+   ```bash
+   npm install ssh1-sftp-client
+   ```
+4. Verify that the package is installed under:
+
+   ```
+   <TerrA_Installation_Path>/node_modules/ssh1-sftp-client
+   ```
+5. Confirm that the package is successfully installed and accessible by the TerrA application.
+
+If the server does not have internet access, please install the package from the organization's approved offline/internal NPM repository along with all required dependencies.
+
+Kindly confirm once the installation is completed.
+
+Thanks,
