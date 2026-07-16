@@ -32,3 +32,32 @@ Please let us know if a call would help walk through this, or if there's someone
 
 Thanks and regards,
 Sasikumar
+==========================================================
+
+
+Subject: Application Slowness and Frequent Server Errors Impacting Automation Execution
+
+Hi [Manager Name],
+
+Today, during automation execution, we frequently encountered the following application error popup, which interrupted execution multiple times:
+
+"An error has occurred and your request could not be completed..." (with a logged Error ID)
+
+Additionally, we observed the following issues:
+
+No heavy data queries are being executed by the automation.
+Login is taking unusually long after clicking the Login button before navigating to the Home screen.
+Intermittent slowness is observed during application navigation, particularly while:
+Using the Show Menu option.
+Clicking Take Action or Back in the Customer Service screen.
+Opening the Authorization Data (Card) screen.
+During the first execution of the day, the application consistently throws:
+"An error has occurred and your request could not be completed..." (with a logged Error ID)
+404 - File or directory not found
+
+These issues are causing automation failures, resulting in incomplete case execution and delays in scheduled batch completion.
+
+Please find the attached screenshots for reference.
+
+Thanks & Regards,
+Sasikumar S
