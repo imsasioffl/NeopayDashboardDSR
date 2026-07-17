@@ -1,7 +1,11 @@
 async function (page, reqElement, xpathval, timeoutsec, expect) {
   try {
-    const timeoutMs = timeoutsec * 1000;
+    // Guard against a zero/negative/garbage timeoutsec being handed down
+    // (e.g. framework already spent most of the step budget locating reqElement)
+    const safeTimeoutSec = (typeof timeoutsec === "number" && timeoutsec > 0) ? timeoutsec : 15;
+    const timeoutMs = safeTimeoutSec * 1000;
     const startTime = Date.now();
+
     let totalClicked = 0;
     let pass = 0;
     const maxPasses = 10;
@@ -10,18 +14,12 @@ async function (page, reqElement, xpathval, timeoutsec, expect) {
       .frameLocator("#applicationFrame")
       .frameLocator(`//frame[@name="fcontent"]`);
 
-    while (pass < maxPasses) {
-      if (Date.now() - startTime > timeoutMs) {
-        console.log("Timeout reached, stopping expansion.");
-        break;
-      }
-
-      // Re-query fresh each pass — clicking re-renders the tree,
-      // so a stale snapshot from .all() will miss new nodes.
+    let clickedThisPass;
+    do {
       const elms = await frame.locator(xpathval).all();
       console.log(`Pass ${pass + 1}: found ${elms.length} candidate nodes`);
 
-      let clickedThisPass = 0;
+      clickedThisPass = 0;
 
       for (const elm of elms) {
         try {
@@ -29,18 +27,20 @@ async function (page, reqElement, xpathval, timeoutsec, expect) {
             await elm.click();
             totalClicked++;
             clickedThisPass++;
-            await page.waitForTimeout(250); // give the tree time to re-render
+            await page.waitForTimeout(250);
           }
         } catch (e) {
-          // Element went stale/detached because the DOM changed underneath it.
-          // Skip it — it'll either already be expanded or get picked up next pass.
-          continue;
+          continue; // stale element from tree re-render, skip
         }
       }
 
       pass++;
-      if (clickedThisPass === 0) break; // nothing left to expand
-    }
+
+      if (Date.now() - startTime > timeoutMs) {
+        console.log("Timeout reached, stopping expansion.");
+        break;
+      }
+    } while (clickedThisPass > 0 && pass < maxPasses);
 
     console.log(`Success. Total tree items clicked: ${totalClicked}`);
     return `Success. Total nodes expanded: ${totalClicked}`;
