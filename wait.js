@@ -112,3 +112,26 @@ async function (page, reqElement, xpathval, timeoutsec, expect) {
     return "Failure. " + err.message;
   }
 }
+// ==========================================
+for (const elm of elms) {
+  try {
+    const key = await elm.evaluate(node => {
+      const p = node.closest('div[id^="PrimeTreeview"]');
+      return p ? p.id : null;
+    });
+
+    if (key && clickedKeys.has(key)) {
+      continue; // already expanded this exact node
+    }
+
+    if (await elm.isVisible()) {
+      await elm.click();
+      totalClicked++;
+      clickedThisPass++;
+      if (key) clickedKeys.add(key);
+      await page.waitForTimeout(250);
+    }
+  } catch (e) {
+    continue;
+  }
+}
