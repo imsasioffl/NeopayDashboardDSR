@@ -1,0 +1,81 @@
+(async function (page, reqElement, xpathval, testdata, timeoutsec) {
+ 
+    const fs = require('fs');
+ 
+    let errorCode;
+ 
+    try {
+ 
+        // Input Format:
+        // FilePath||VerifyValue1
+        // FilePath||VerifyValue1||VerifyValue2||VerifyValue3
+ 
+        const parts = testdata.split("||");
+ 
+        if (parts.length < 2) {
+            return "Invalid input. Expected format: FilePath||VerifyValue1[||VerifyValue2...]";
+        }
+ 
+        const filePath = parts[0].trim();
+        const verifyValues = parts.slice(1).map(v => v.trim());
+ 
+        if (!fs.existsSync(filePath)) {
+            return "FAILED - File not found: " + filePath;
+        }
+ 
+        const fileContent = fs.readFileSync(filePath, "utf8");
+ 
+        const lines = fileContent.split(/\r?\n/);
+ 
+        for (let i = 0; i < lines.length; i++) {
+ 
+            const line = lines[i];
+ 
+            // Skip blank lines
+            if (!line.trim()) {
+                continue;
+            }
+ 
+            // Split comma-separated values and trim each value
+            const columns = line.split(",").map(col => col.trim());
+ 
+            // First verify value should exist in the line
+            if (!columns.includes(verifyValues[0])) {
+                continue;
+            }
+ 
+            // If only one verify value, success
+            if (verifyValues.length === 1) {
+ 
+                global.retvalue = (i + 1) + "||" + line;
+ 
+                return "SUCCESS - Matching line found at line " + (i + 1) +
+                       ".\nLine Data: " + line;
+            }
+ 
+            // Check all verify values exist in the same line
+            const allMatched = verifyValues.every(value =>
+                columns.includes(value)
+            );
+ 
+            if (allMatched) {
+ 
+                global.retvalue = (i + 1) + "||" + line;
+ 
+                return "SUCCESS - Matching line found at line " + (i + 1) +
+                       ".\nLine Data: " + line;
+            }
+        }
+ 
+        return "FAILED - No matching line found for the given verification value(s).";
+ 
+    }
+    catch (err) {
+ 
+        errorCode = err;
+ 
+        return "FAILED - Error while verifying file.\nError: " + errorCode;
+ 
+    }
+ 
+});
