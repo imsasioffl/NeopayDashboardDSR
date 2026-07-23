@@ -1,19 +1,38 @@
-(async function (page, reqElement, xpathval, testdata, timeoutSec) {
+// Get Formatted Value by Key
+nova.db_getFormattedValue___$Get_Formatted_Value$ = (response, key) => {
  
-    console.log("Inside keyword Input - Hidden Field");
+    return (function () {
  
-    try {
+        const value = Number(response[key]);
  
-        await page.locator(xpathval).evaluate((element, value) => {
-            element.value = value;
-        }, testdata);
+        return value.toLocaleString('en-US', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
  
-        return "Success - Hidden input value updated.";
+    })();
+};
+
+
+
+// ===
+
+
+let response = {
+    negativeSum: 2400.2,
+    positiveSum: 400,
+    netDifference: 2000.1999999999998,
+    percentValue: 100.00999999999999
+};
  
-    } catch (err) {
+console.log(nova.db_getFormattedValue___$Get_Formatted_Value$(response, "netDifference"));
+// Output: 2,000.20
  
-        return "Failure - " + err.message;
+console.log(nova.db_getFormattedValue___$Get_Formatted_Value$(response, "percentValue"));
+// Output: 100.01
  
-    }
+console.log(nova.db_getFormattedValue___$Get_Formatted_Value$(response, "negativeSum"));
+// Output: 2,400.20
  
-});
+console.log(nova.db_getFormattedValue___$Get_Formatted_Value$(response, "positiveSum"));
+// Output: 400.00
