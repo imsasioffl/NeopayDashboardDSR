@@ -6,17 +6,25 @@
 
     const conn = new Client();
 
-    // Local folder
     const outputFolder = path.join(path.resolve("."), "acquiringFiles");
 
     if (!fs.existsSync(outputFolder)) {
         fs.mkdirSync(outputFolder, { recursive: true });
     }
 
-    // Remote directory
-    const remoteDirectory = testdata.trim();
+    //=====================================================
+    // Input
+    // /remote/path||MB_Merchant_info_
+    //=====================================================
 
-    // SFTP Configuration
+    const input = testdata.split("||");
+
+    const remoteDirectory = input[0].trim();
+
+    const filePattern = input.length > 1
+        ? input[1].trim()
+        : "";
+
     const config = {
         host: "",
         port: "",
@@ -24,7 +32,6 @@
         password: ""
     };
 
-    // Cache
     global.fileCache = {};
     global.fileList = [];
 
@@ -49,51 +56,68 @@
                             return resolve();
                         }
 
-                        // Download sequentially
-                        for (const file of list) {
+                        try {
 
-                            // Skip directories
-                            if (file.longname.startsWith("d"))
-                                continue;
+                            for (const file of list) {
 
-                            const remoteFile =
-                                path.posix.join(remoteDirectory, file.filename);
+                                // Skip directories
+                                if (file.longname.startsWith("d"))
+                                    continue;
 
-                            const localFile =
-                                path.join(
-                                    outputFolder,
-                                    Date.now() + "_" + file.filename
-                                );
+                                // Apply filename filter
+                                if (filePattern &&
+                                    !file.filename.includes(filePattern))
+                                    continue;
 
-                            await new Promise((res, rej) => {
+                                const remoteFile =
+                                    path.posix.join(
+                                        remoteDirectory,
+                                        file.filename
+                                    );
 
-                                sftp.fastGet(
-                                    remoteFile,
-                                    localFile,
-                                    {},
-                                    function (err) {
+                                const localFile =
+                                    path.join(
+                                        outputFolder,
+                                        Date.now() + "_" + file.filename
+                                    );
 
-                                        if (err)
-                                            return rej(err);
+                                await new Promise((res, rej) => {
 
-                                        res();
+                                    sftp.fastGet(
+                                        remoteFile,
+                                        localFile,
+                                        {},
+                                        function (err) {
 
-                                    });
+                                            if (err)
+                                                return rej(err);
 
-                            });
+                                            res();
 
-                            // Store path
-                            global.fileList.push(localFile);
+                                        });
 
-                            // Read once and cache
-                            global.fileCache[localFile] =
-                                fs.readFileSync(localFile, "utf8");
+                                });
+
+                                global.fileList.push(localFile);
+
+                                global.fileCache[localFile] =
+                                    fs.readFileSync(
+                                        localFile,
+                                        "utf8"
+                                    );
+
+                            }
+
+                            conn.end();
+
+                            resolve();
 
                         }
+                        catch (e) {
 
-                        conn.end();
+                            reject(e);
 
-                        resolve();
+                        }
 
                     });
 
@@ -111,8 +135,8 @@
 
         return (
             "SUCCESS\n\n" +
-            "Total Files Downloaded : " +
-            global.fileList.length
+            "Pattern : " + filePattern + "\n" +
+            "Files Downloaded : " + global.fileList.length
         );
 
     }
@@ -121,7 +145,7 @@
         try {
             conn.end();
         }
-        catch (e) { }
+        catch (e) {}
 
         return "FAILED\n" + err;
 
