@@ -1,0 +1,82 @@
+(async function (page, reqElement, xpathval, testdata, timeoutsec) {
+    const { Client } = require('ssh2');
+    const fs = require('fs');
+    const path = require('path');
+
+    let errorCode;
+
+    // Fixed path separator and string formatting
+    const outputFolderPath = path.join(path.resolve("."), "acquiringFiles");
+
+    if (!fs.existsSync(outputFolderPath)) {
+        fs.mkdirSync(outputFolderPath, { recursive: true });
+    }
+
+    const epochTime = new Date().getTime();
+
+    // Remote file path passed in testdata
+    const remoteFilePath = testdata;
+    const localFileName = path.basename(remoteFilePath);
+
+    // Fixed template literal backticks
+    const localFilePath = path.join(
+        outputFolderPath,
+        `${epochTime}_${localFileName}`
+    );
+
+    const config = {
+        host: "10.172.52.11",
+        port: "22",
+        username: "prime",
+        password: "NeoPay@NewWorld_2026"
+    };
+
+    const downloadFile = async () => {
+        const conn = new Client();
+
+        return new Promise((resolve, reject) => {
+            conn.on("ready", () => {
+                console.log("SSH Connected");
+
+                conn.sftp((err, sftp) => {
+                    if (err) {
+                        conn.end(); // Always clean up connection on SFTP error
+                        reject(err);
+                        return;
+                    }
+
+                    sftp.fastGet(remoteFilePath, localFilePath, {}, (err) => {
+                        conn.end(); // Close connection after download finishes or fails
+
+                        if (err) {
+                            reject(err);
+                            return;
+                        }
+
+                        console.log("File downloaded successfully.");
+                        resolve();
+                    });
+                });
+            });
+
+            conn.on("error", (err) => {
+                reject(err);
+            });
+
+            conn.connect(config);
+        });
+    };
+
+    try {
+        await downloadFile();
+
+        global.retvalue = localFilePath;
+
+        return "Success. File downloaded successfully to : " + localFilePath;
+
+    } catch (err) {
+        errorCode = err.message || err;
+
+        return "Failure. File download failed : " + errorCode;
+    }
+});
