@@ -1,0 +1,615 @@
+
+(async function (page, reqElement, xpathval, testdata, timeoutsec, TwitterApi, faker) {
+
+    const fs = require('fs');
+
+    /* =================================================================================
+     * SECTION 1 : SMALL SHARED HELPERS
+     * ================================================================================= */
+
+    // Separator lines used by the Terra report blocks.
+    const REPORT_RULE = '====================================';
+
+    /**
+     * Removes the wrapping double quotes of a value, when present.
+     * Quoting is the way the caller keeps significant leading / trailing spaces.
+     */
+    function unquote(rawValue) {
+        const value = String(rawValue);
+        if (value.length >= 2 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+            return value.substring(1, value.length - 1);
+        }
+        return value.trim();
+    }
+
+    /**
+     * Trims TRAILING spaces only. Leading spaces are significant in fixed width
+     * files (right justified numeric fields) and must never be removed.
+     */
+    function trimTrailingSpaces(value) {
+        return String(value).replace(/[ \t]+$/, '');
+    }
+
+    /**
+     * Returns the directory portion of a path. Implemented manually so the keyword
+     * stays on the "fs module only" constraint.
+     */
+    function getDirectory(filePath) {
+        const normalised = String(filePath);
+        const lastSeparator = Math.max(normalised.lastIndexOf('\\'), normalised.lastIndexOf('/'));
+        return lastSeparator > 0 ? normalised.substring(0, lastSeparator) : '';
+    }
+
+    /**
+     * Pads / justifies a value into a fixed width field.
+     * padMode : L = left justify, R = right justify with spaces, Z = right justify with zeros
+     */
+    function fitToWidth(value, width, padMode) {
+        const text = String(value);
+        if (text.length >= width) {
+            return text.substring(0, width);
+        }
+        const filler = (padMode === 'Z' ? '0' : ' ').repeat(width - text.length);
+        return (padMode === 'R' || padMode === 'Z') ? filler + text : text + filler;
+    }
+
+    /* =================================================================================
+     * SECTION 2 : TESTDATA PARSING
+     * ================================================================================= */
+
+    /**
+     * Parses the raw Terra testdata string into a configuration object.
+     *
+     * Properties are separated by ";" and each property is "key=value". Only the FIRST
+     * "=" is treated as the separator so Windows paths and values containing "=" survive.
+     * Newlines inside the testdata are pure formatting and are stripped from keys.
+     *
+     * @returns {{properties: Object, entries: Array}} parsed configuration
+     */
+    function parseTestData(rawTestData) {
+        if (rawTestData === undefined || rawTestData === null || String(rawTestData).trim() === '') {
+            throw new Error('testdata is empty. Expected at least action= and the file path.');
+        }
+
+        const properties = {};
+
+        // Split on ";" then map every chunk to a key / value pair.
+        String(rawTestData).split(';').forEach(function (chunk) {
+            if (chunk.trim() === '') {
+                return;
+            }
+            const separatorIndex = chunk.indexOf('=');
+            if (separatorIndex === -1) {
+                throw new Error('Malformed testdata property (no "=" found) : ' + chunk.trim());
+            }
+            const key = chunk.substring(0, separatorIndex).trim().toLowerCase();
+            const value = chunk.substring(separatorIndex + 1).trim();
+            properties[key] = value;
+        });
+
+        // "updates" is used by UPDATE mode, "verify" by VERIFY mode. Accept both spellings
+        // so the same parser serves the two actions.
+        const rawEntries = properties.updates || properties.verify || properties.verifications || '';
+
+        return { properties: properties, entries: parseEntries(rawEntries) };
+    }
+
+    /**
+     * Parses the "|" separated entry list into structured records.
+     * Each entry : LineNumber,StartPosition,EndPosition,Value[,PadMode]
+     */
+    function parseEntries(rawEntries) {
+        const entries = [];
+
+        String(rawEntries).split('|').forEach(function (rawEntry) {
+            if (rawEntry.trim() === '') {
+                return;
+            }
+
+            // Split into at most 5 tokens. The value itself may contain commas
+            // (for example RANDOM_DECIMAL(12,2)), so the value token is rebuilt below.
+            const tokens = rawEntry.split(',');
+            if (tokens.length < 4) {
+                throw new Error('Malformed entry, expected "line,start,end,value" : ' + rawEntry.trim());
+            }
+
+            const lineNumber = parseInt(tokens[0].trim(), 10);
+            const startPosition = parseInt(tokens[1].trim(), 10);
+            const endPosition = parseInt(tokens[2].trim(), 10);
+
+            // Everything after the third comma belongs to the value, except a trailing
+            // single character pad mode token (L / R / Z) when one is present.
+            let valueTokens = tokens.slice(3);
+            let padMode = 'L';
+            const lastToken = valueTokens[valueTokens.length - 1].trim().toUpperCase();
+            if (valueTokens.length > 1 && (lastToken === 'L' || lastToken === 'R' || lastToken === 'Z')) {
+                padMode = lastToken;
+                valueTokens = valueTokens.slice(0, valueTokens.length - 1);
+            }
+            const value = unquote(valueTokens.join(','));
+
+            // Validate the coordinates before anything touches the file.
+            if (!Number.isInteger(lineNumber) || lineNumber < 1) {
+                throw new Error('Invalid line number "' + tokens[0].trim() + '" in entry : ' + rawEntry.trim());
+            }
+            if (!Number.isInteger(startPosition) || startPosition < 1) {
+                throw new Error('Invalid start position "' + tokens[1].trim() + '" in entry : ' + rawEntry.trim());
+            }
+            if (!Number.isInteger(endPosition) || endPosition < startPosition) {
+                throw new Error('Invalid end position "' + tokens[2].trim() + '" in entry : ' + rawEntry.trim());
+            }
+
+            entries.push({
+                lineNumber: lineNumber,
+                startPosition: startPosition,
+                endPosition: endPosition,
+                width: endPosition - startPosition + 1,
+                value: value,
+                padMode: padMode
+            });
+        });
+
+        if (entries.length === 0) {
+            throw new Error('No update / verify entries found in testdata.');
+        }
+        return entries;
+    }
+
+    /* =================================================================================
+     * SECTION 3 : DATE FORMATTING AND DYNAMIC VALUES
+     * ================================================================================= */
+
+    const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    /**
+     * Formats a Date using Java style pattern tokens.
+     * All tokens are resolved in a single pass so that already substituted digits
+     * can never be re-interpreted as another token.
+     */
+    function formatDate(dateValue, pattern) {
+        const format = (pattern === undefined || pattern === null || pattern === '') ? 'ddMMyy' : String(pattern);
+
+        const pad = function (number, length) {
+            return String(number).padStart(length, '0');
+        };
+
+        const hours24 = dateValue.getHours();
+        const hours12 = (hours24 % 12) === 0 ? 12 : (hours24 % 12);
+
+        const tokenValues = {
+            yyyy: pad(dateValue.getFullYear(), 4),
+            yy: pad(dateValue.getFullYear() % 100, 2),
+            MMM: MONTH_ABBREVIATIONS[dateValue.getMonth()],
+            MM: pad(dateValue.getMonth() + 1, 2),
+            dd: pad(dateValue.getDate(), 2),
+            HH: pad(hours24, 2),
+            hh: pad(hours12, 2),
+            mm: pad(dateValue.getMinutes(), 2),
+            ss: pad(dateValue.getSeconds(), 2),
+            SSS: pad(dateValue.getMilliseconds(), 3),
+            a: hours24 < 12 ? 'AM' : 'PM'
+        };
+
+        return format.replace(/yyyy|yy|MMM|MM|dd|HH|hh|mm|ss|SSS|a/g, function (token) {
+            return tokenValues[token];
+        });
+    }
+
+    /** Builds a random string of the requested length from the supplied character set. */
+    function randomFromCharset(length, charset) {
+        let result = '';
+        for (let index = 0; index < length; index++) {
+            result += charset.charAt(Math.floor(Math.random() * charset.length));
+        }
+        return result;
+    }
+
+    /** Generates an RFC4122 version 4 UUID without leaving the fs-only constraint. */
+    function generateUuid() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (placeholder) {
+            const randomNibble = Math.floor(Math.random() * 16);
+            const nibble = placeholder === 'x' ? randomNibble : ((randomNibble & 0x3) | 0x8);
+            return nibble.toString(16);
+        });
+    }
+
+    /**
+     * Resolves a value token into its final text.
+     * Anything that is not a recognised token is returned unchanged (static value).
+     */
+    function getDynamicValue(rawValue) {
+        const value = String(rawValue);
+        const tokenMatch = value.match(/^([A-Z_]+)(?:\(\s*([^)]*)\s*\))?$/);
+
+        // Not a token shape at all, treat as a static value.
+        if (!tokenMatch) {
+            return value;
+        }
+
+        const tokenName = tokenMatch[1];
+        const tokenArguments = tokenMatch[2] === undefined ? [] : tokenMatch[2].split(',').map(function (argument) {
+            return argument.trim();
+        });
+
+        // Reads a positive integer argument, throwing a caller friendly error.
+        const requirePositiveInteger = function (argumentIndex, argumentName) {
+            const parsed = parseInt(tokenArguments[argumentIndex], 10);
+            if (!Number.isInteger(parsed) || parsed < 1) {
+                throw new Error(tokenName + ' requires a positive integer ' + argumentName +
+                    ', received "' + tokenArguments[argumentIndex] + '".');
+            }
+            return parsed;
+        };
+
+        switch (tokenName) {
+            case 'RANDOM_NUM':
+                return randomFromCharset(requirePositiveInteger(0, 'length'), '0123456789');
+
+            case 'RANDOM_ALPHA':
+                return randomFromCharset(requirePositiveInteger(0, 'length'), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+
+            case 'RANDOM_ALPHANUM':
+                return randomFromCharset(requirePositiveInteger(0, 'length'), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
+
+            case 'RANDOM_DECIMAL': {
+                // "length" is the TOTAL character count of the result, decimal point included.
+                const totalLength = requirePositiveInteger(0, 'length');
+                const decimalPlaces = requirePositiveInteger(1, 'decimalPlaces');
+                const integerDigits = totalLength - decimalPlaces - 1;
+                if (integerDigits < 1) {
+                    throw new Error('RANDOM_DECIMAL(' + totalLength + ',' + decimalPlaces + ') leaves no room for ' +
+                        'the integer part. Total length must be at least decimalPlaces + 2.');
+                }
+                return randomFromCharset(integerDigits, '0123456789') + '.' +
+                    randomFromCharset(decimalPlaces, '0123456789');
+            }
+
+            case 'UUID':
+                return generateUuid();
+
+            case 'TIMESTAMP':
+                return String(Date.now());
+
+            case 'TODAY': {
+                // Date only, time components forced to zero so TODAY(HHmmss) is deterministic.
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                return formatDate(today, tokenArguments[0]);
+            }
+
+            case 'NOW':
+                return formatDate(new Date(), tokenArguments[0]);
+
+            default:
+                // Unknown all-caps word, for example a static value like TESTUSER.
+                return value;
+        }
+    }
+
+    /* =================================================================================
+     * SECTION 4 : FILE READ / WRITE PRESERVING THE ORIGINAL LAYOUT
+     * ================================================================================= */
+
+    /**
+     * Reads a file and splits it into lines WITHOUT losing the original line endings.
+     * The capturing split keeps every terminator so the file can be rebuilt byte for byte.
+     *
+     * @returns {{lines: string[], terminators: string[]}}
+     */
+    function readFileLines(filePath, encoding) {
+        if (!fs.existsSync(filePath)) {
+            throw new Error('File not found : ' + filePath);
+        }
+        const stats = fs.statSync(filePath);
+        if (!stats.isFile()) {
+            throw new Error('Path is not a file : ' + filePath);
+        }
+
+        const content = fs.readFileSync(filePath, encoding);
+        const segments = content.split(/(\r\n|\n|\r)/);
+
+        const lines = [];
+        const terminators = [];
+        for (let index = 0; index < segments.length; index += 2) {
+            // A trailing terminator produces a final empty segment, which is not a real line.
+            if (segments[index] === '' && index === segments.length - 1 && index > 0) {
+                break;
+            }
+            lines.push(segments[index]);
+            terminators.push(segments[index + 1] === undefined ? '' : segments[index + 1]);
+        }
+
+        return { lines: lines, terminators: terminators };
+    }
+
+    /** Rebuilds the file content from the lines and their original terminators. */
+    function joinFileLines(fileData) {
+        return fileData.lines.map(function (line, index) {
+            return line + fileData.terminators[index];
+        }).join('');
+    }
+
+    /** Creates the target directory when it does not exist yet. */
+    function ensureDirectoryExists(filePath) {
+        const directory = getDirectory(filePath);
+        if (directory !== '' && !fs.existsSync(directory)) {
+            fs.mkdirSync(directory, { recursive: true });
+        }
+    }
+
+    /* =================================================================================
+     * SECTION 5 : UPDATE MODE
+     * ================================================================================= */
+
+    /**
+     * Applies every update entry to the input file and writes the result to the output file.
+     * Field widths are respected, so the record length of each line never changes.
+     *
+     * @returns {{report: string[], appliedCount: number}}
+     */
+    function updateFile(inputFile, outputFile, entries, encoding, onOverflow) {
+        const fileData = readFileLines(inputFile, encoding);
+        const report = [];
+
+        entries.forEach(function (entry) {
+            const lineIndex = entry.lineNumber - 1;
+
+            if (lineIndex >= fileData.lines.length) {
+                throw new Error('Line ' + entry.lineNumber + ' does not exist. The file has ' +
+                    fileData.lines.length + ' line(s).');
+            }
+
+            // Resolve dynamic tokens, then check the value against the field width.
+            const resolvedValue = getDynamicValue(entry.value);
+            if (resolvedValue.length > entry.width) {
+                if (onOverflow === 'FAIL') {
+                    throw new Error('Value "' + resolvedValue + '" (length ' + resolvedValue.length +
+                        ') does not fit field ' + entry.startPosition + '-' + entry.endPosition +
+                        ' (width ' + entry.width + ') on line ' + entry.lineNumber +
+                        '. Use onOverflow=TRUNCATE to allow truncation.');
+                }
+                report.push('WARN | Line: ' + entry.lineNumber + ' | Value truncated from ' +
+                    resolvedValue.length + ' to ' + entry.width + ' characters.');
+            }
+
+            const fieldValue = fitToWidth(resolvedValue, entry.width, entry.padMode);
+
+            // Pad the line to the field end when the record is shorter than the target
+            // position, so that the field always lands on the exact columns requested.
+            let line = fileData.lines[lineIndex];
+            if (line.length < entry.endPosition) {
+                line = line + ' '.repeat(entry.endPosition - line.length);
+            }
+
+            fileData.lines[lineIndex] =
+                line.substring(0, entry.startPosition - 1) +
+                fieldValue +
+                line.substring(entry.endPosition);
+
+            report.push('UPDATED | Line: ' + entry.lineNumber +
+                ' | Start: ' + entry.startPosition +
+                ' | End: ' + entry.endPosition +
+                ' | Value: [' + fieldValue + ']');
+        });
+
+        // Persist only after every entry has been applied successfully.
+        ensureDirectoryExists(outputFile);
+        fs.writeFileSync(outputFile, joinFileLines(fileData), encoding);
+
+        return { report: report, appliedCount: entries.length };
+    }
+
+    /* =================================================================================
+     * SECTION 6 : VERIFY MODE
+     * ================================================================================= */
+
+    /**
+     * Verifies every entry against the file. Validation never stops on the first
+     * failure, so a single run reports the complete picture.
+     *
+     * @returns {{report: string[], total: number, passed: number, failed: number}}
+     */
+    function verifyFile(filePath, entries, encoding) {
+        const fileData = readFileLines(filePath, encoding);
+        const report = [];
+        let passed = 0;
+        let failed = 0;
+
+        entries.forEach(function (entry) {
+            const lineIndex = entry.lineNumber - 1;
+            const expectedValue = trimTrailingSpaces(entry.value);
+
+            const location = 'Line: ' + entry.lineNumber +
+                ' | Start: ' + entry.startPosition +
+                ' | End: ' + entry.endPosition;
+
+            // Missing line, record the failure and move on to the next entry.
+            if (lineIndex >= fileData.lines.length) {
+                failed++;
+                report.push('FAIL | ' + location +
+                    ' | Expected: [' + expectedValue + ']' +
+                    ' | Actual: [] | Reason: Line does not exist, file has ' +
+                    fileData.lines.length + ' line(s).');
+                return;
+            }
+
+            const line = fileData.lines[lineIndex];
+
+            // Short record, the requested columns are not present at all.
+            if (line.length < entry.startPosition) {
+                failed++;
+                report.push('FAIL | ' + location +
+                    ' | Expected: [' + expectedValue + ']' +
+                    ' | Actual: [] | Reason: Line length ' + line.length +
+                    ' is shorter than start position ' + entry.startPosition + '.');
+                return;
+            }
+
+            // Extract the field, then drop trailing spaces only. Leading spaces are kept.
+            const rawActualValue = line.substring(entry.startPosition - 1, entry.endPosition);
+            const actualValue = trimTrailingSpaces(rawActualValue);
+
+            if (actualValue === expectedValue) {
+                passed++;
+                report.push('PASS | ' + location +
+                    ' | Expected: [' + expectedValue + ']' +
+                    ' | Actual: [' + actualValue + ']');
+            } else {
+                failed++;
+                const reason = actualValue.length !== expectedValue.length
+                    ? 'Length mismatch, expected ' + expectedValue.length +
+                      ' character(s) but found ' + actualValue.length + '.'
+                    : 'Value mismatch at field ' + entry.startPosition + '-' + entry.endPosition + '.';
+                report.push('FAIL | ' + location +
+                    ' | Expected: [' + expectedValue + ']' +
+                    ' | Actual: [' + actualValue + ']' +
+                    ' | Reason: ' + reason);
+            }
+        });
+
+        return { report: report, total: entries.length, passed: passed, failed: failed };
+    }
+
+    /* =================================================================================
+     * SECTION 7 : REPORTING
+     * ================================================================================= */
+
+    /** Builds the fixed layout verification summary block. */
+    function generateSummary(total, passed, failed) {
+        return [
+            REPORT_RULE,
+            'Verification Summary',
+            REPORT_RULE,
+            'Total Validations : ' + total,
+            'Passed            : ' + passed,
+            'Failed            : ' + failed,
+            REPORT_RULE
+        ];
+    }
+
+    /* =================================================================================
+     * SECTION 8 : KEYWORD ENTRY POINT
+     * ================================================================================= */
+
+    try {
+        const configuration = parseTestData(testdata);
+        const properties = configuration.properties;
+        const entries = configuration.entries;
+
+        const action = String(properties.action || '').trim().toUpperCase();
+        const encoding = String(properties.encoding || 'utf8').trim();
+        const onOverflow = String(properties.onoverflow || 'FAIL').trim().toUpperCase();
+
+        if (onOverflow !== 'FAIL' && onOverflow !== 'TRUNCATE') {
+            throw new Error('Invalid onOverflow value "' + onOverflow + '". Expected FAIL or TRUNCATE.');
+        }
+
+        /* ---------------------------------- UPDATE ---------------------------------- */
+        if (action === 'UPDATE') {
+            const inputFile = properties.inputfile || properties.file;
+            if (!inputFile) {
+                throw new Error('UPDATE requires inputFile= in the testdata.');
+            }
+            // Updating in place is allowed by omitting outputFile.
+            const outputFile = properties.outputfile || inputFile;
+
+            const result = updateFile(inputFile, outputFile, entries, encoding, onOverflow);
+
+            const message = ['SUCCESS', 'Output File Created Successfully.']
+                .concat(result.report)
+                .concat([
+                    REPORT_RULE,
+                    'Fields Updated : ' + result.appliedCount,
+                    'Input File     : ' + inputFile,
+                    'Output File    : ' + outputFile,
+                    REPORT_RULE
+                ]).join('\n');
+
+            console.log(message);
+            return message;
+        }
+
+        /* ---------------------------------- VERIFY ---------------------------------- */
+        if (action === 'VERIFY') {
+            const filePath = properties.file || properties.outputfile || properties.inputfile;
+            if (!filePath) {
+                throw new Error('VERIFY requires file= in the testdata.');
+            }
+
+            const result = verifyFile(filePath, entries, encoding);
+
+            // Every record is reported, then the summary, then the overall verdict.
+            const header = result.failed > 0 ? 'FAILURE' : 'SUCCESS';
+            const message = [header, 'File : ' + filePath]
+                .concat(result.report)
+                .concat(generateSummary(result.total, result.passed, result.failed))
+                .join('\n');
+
+            console.log(message);
+            return message;
+        }
+
+        throw new Error('Invalid action "' + action + '". Expected UPDATE or VERIFY.');
+
+    } catch (error) {
+        // No exception ever reaches Terra, failures are reported as a FAILURE string.
+        const message = ['FAILURE', 'Fixed Width File Keyword Error.', error && error.message ? error.message : String(error)].join('\n');
+        console.log(message);
+        return message;
+    }
+
+})
+
+
+/**
+
+ *  action=UPDATE;
+ *  inputFile=C:\Input\Input.txt;
+ *  outputFile=C:\Output\Output.txt;
+ *  updates=
+ *  10,1,16,RANDOM_NUM(16)|
+ *  10,18,23,TODAY(ddMMyy)|
+ *  10,48,55,RANDOM_NUM(8)|
+ *  11,20,30,TESTUSER
+ *
+ *  action=VERIFY;
+ *  file=C:\Output\Output.txt;
+ *  verify=
+ *  10,1,16,1234567890123456|
+ *  10,18,23,270726|
+ *  10,48,55,98765432|
+ *  11,20,30,TESTUSER
+ *
+ * -------------------------------------------------------------------------------------
+ * ENTRY FORMAT : LineNumber,StartPosition,EndPosition,Value[,PadMode]
+ * -------------------------------------------------------------------------------------
+ *  LineNumber      1 based line number inside the file
+ *  StartPosition   1 based column, inclusive
+ *  EndPosition     1 based column, inclusive
+ *  Value           static value, or a dynamic token (UPDATE), or expected value (VERIFY)
+ *  PadMode         OPTIONAL, UPDATE only : L (default, left justify + trailing spaces)
+ *                                         R (right justify + leading spaces)
+ *                                         Z (right justify + leading zeros)
+ *
+ *  Wrap a value in double quotes to preserve its leading / trailing spaces,
+ *  e.g.  11,20,30,"  TESTUSER"
+ *
+ * -------------------------------------------------------------------------------------
+ * DYNAMIC VALUE TOKENS (UPDATE mode)
+ * -------------------------------------------------------------------------------------
+ *  RANDOM_NUM(length)                  numeric string of the given length
+ *  RANDOM_ALPHA(length)                uppercase alphabetic string
+ *  RANDOM_ALPHANUM(length)             uppercase alphanumeric string
+ *  RANDOM_DECIMAL(length,decimals)     decimal number, "length" = TOTAL characters
+ *                                      including the "." separator
+ *  UUID                                RFC4122 version 4 UUID
+ *  TIMESTAMP                           epoch milliseconds
+ *  TODAY(format)                       current date, time part forced to 00:00:00.000
+ *  NOW(format)                         current date and time
+ *
+ *  Date format tokens : yyyy yy MMM MM dd HH hh mm ss SSS a
+
+ * =====================================================================================
+ */
+
