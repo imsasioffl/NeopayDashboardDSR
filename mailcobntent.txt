@@ -1,0 +1,6 @@
+Hi Bulent,
+ 
+Please find below the Tranche 2 Automation Run Plan. The actual start date, initially planned for automation is "24/07/2026" , has been revised to start by tomorrow - "05/08/2026 "due to the hold in confirmation of the functional scope coverage.
+ 
+  
+Note : The above Tranche 2 run plan is based on the current assumptions and is subject to EOD execution dependencies. Any delay or issues in the EOD execution schedule may impact the planned execution timeline, in which case the completion date may need to be extended accordingly.
