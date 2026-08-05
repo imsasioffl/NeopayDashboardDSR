@@ -1,2 +1,3 @@
-Based on the team's analysis, the Check Point connection on my machine was suspected to be the cause of the VDI disconnections. They advised disconnecting Check Point before logging into Accops, and after doing so, the issue was no longer observed. However, for Sasi's user, the Check Point is already disconnected, yet the same VDI disconnection occurs while working inside the VDI. This indicates that the root cause has not been identified, and only a workaround has been provided. As a result, the same issue may occur again in the future.
- 
+Hi Bulent,
+The initial planned end date for Tranche 2 was 24-Aug-2026.
+We will also continue to share the Daily Status Report (DSR) and Weekly Status Report (WSR) for Tranche 2 in the same format.
