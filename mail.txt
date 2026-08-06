@@ -1,3 +1,10 @@
 Hi Bulent,
 The initial planned end date for Tranche 2 was 24-Aug-2026.
 We will also continue to share the Daily Status Report (DSR) and Weekly Status Report (WSR) for Tranche 2 in the same format.
+
+
+* Commenced Tranche 2 automation activities.
+
+* **Acquiring:** Analyzed the application navigation and captured Object Repositories (ORs) for the **Merchant Maintenance** functionality.
+
+* **Issuing:** Analyzed the application navigation and captured Object Repositories (ORs) for the **Customer Maintenance** functionality.
